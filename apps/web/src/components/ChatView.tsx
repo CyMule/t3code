@@ -368,6 +368,7 @@ import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { createPageScrollController, type PageScrollKey } from "./chat/pageScrollController";
 import { isTimelineScrollTarget } from "./chat/timelineScrollTarget";
+import { useScratchDraftEnvironment } from "../hooks/useScratchDraftEnvironment";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
@@ -2448,6 +2449,15 @@ export default function ChatView(props: ChatViewProps) {
     },
     [navigate, setEnvironmentEnabled],
   );
+  const canSwitchScratchEnvironment = useCallback(
+    () => !isServerThread && !sendInFlightRef.current,
+    [isServerThread, sendInFlightRef],
+  );
+  const scratchDraftEnvironment = useScratchDraftEnvironment({
+    draftId,
+    activeProject,
+    canSwitch: canSwitchScratchEnvironment,
+  });
   const logicalProjectEnvironments = useMemo(() => {
     if (!activeProject) return [];
     const logicalKey = deriveLogicalProjectKeyFromSettings(activeProject, projectGroupingSettings);
@@ -2476,9 +2486,12 @@ export default function ChatView(props: ChatViewProps) {
     });
     return envs;
   }, [activeProject, allProjects, projectGroupingSettings, primaryEnvironmentId, environmentById]);
-  const hasMultipleEnvironments = logicalProjectEnvironments.length > 1;
+  const composerEnvironments = scratchDraftEnvironment.isScratchDraft
+    ? scratchDraftEnvironment.availableEnvironments
+    : logicalProjectEnvironments;
+  const hasMultipleEnvironments = composerEnvironments.length > 1;
   const activeEnvironmentOption =
-    logicalProjectEnvironments.find(
+    composerEnvironments.find(
       (environment) => environment.environmentId === activeThread?.environmentId,
     ) ?? null;
   const showComposerEnvironmentIndicator = shouldShowEnvironmentIndicator({
@@ -2635,6 +2648,7 @@ export default function ChatView(props: ChatViewProps) {
     clientSettingsHydrated &&
     draftId &&
     !envLocked &&
+    !scratchDraftEnvironment.isScratchDraft &&
     hasMultipleEnvironments &&
     loadBalancingSettings.loadBalancingEnabled &&
     draftThread?.environmentSelection !== "manual" &&
@@ -3890,7 +3904,11 @@ export default function ChatView(props: ChatViewProps) {
   // project in that environment while keeping the same logical project.
   const onEnvironmentChange = useCallback(
     (nextEnvironmentId: EnvironmentId) => {
-      if (envLocked || !draftId) return;
+      if (envLocked || !draftId || sendInFlightRef.current) return;
+      if (scratchDraftEnvironment.isScratchDraft) {
+        void scratchDraftEnvironment.selectEnvironment(nextEnvironmentId);
+        return;
+      }
       const target = logicalProjectEnvironments.find(
         (env) => env.environmentId === nextEnvironmentId,
       );
@@ -3901,7 +3919,14 @@ export default function ChatView(props: ChatViewProps) {
         loadBalancedEnvironmentId: null,
       });
     },
-    [draftId, envLocked, logicalProjectEnvironments, setDraftThreadContext],
+    [
+      draftId,
+      envLocked,
+      logicalProjectEnvironments,
+      setDraftThreadContext,
+      scratchDraftEnvironment,
+      sendInFlightRef,
+    ],
   );
 
   const activeTerminalGroup =
@@ -6886,6 +6911,23 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "composer.cycleHost") {
+        if (envLocked || !draftId || !hasMultipleEnvironments) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.repeat) return;
+        if (scratchDraftEnvironment.isScratchDraft) {
+          scratchDraftEnvironment.cycleEnvironment();
+        } else {
+          const index = composerEnvironments.findIndex(
+            (env) => env.environmentId === environmentId,
+          );
+          const next = composerEnvironments[(index + 1) % composerEnvironments.length];
+          if (next) onEnvironmentChange(next.environmentId);
+        }
+        return;
+      }
+
       if (command === "composer.branch") {
         event.preventDefault();
         event.stopPropagation();
@@ -6968,6 +7010,13 @@ export default function ChatView(props: ChatViewProps) {
     toggleRightPanelMaximized,
     toggleTerminalVisibility,
     composerRef,
+    composerEnvironments,
+    draftId,
+    environmentId,
+    envLocked,
+    hasMultipleEnvironments,
+    onEnvironmentChange,
+    scratchDraftEnvironment,
   ]);
 
   // Paste-to-focus: the resting composer blurs on a click into the timeline,
@@ -7359,7 +7408,8 @@ export default function ChatView(props: ChatViewProps) {
       !clientSettingsHydrated ||
       threadDetailLoading ||
       sendInFlightRef.current ||
-      feedbackUploadsInFlightRef.current.has(routeThreadKey)
+      feedbackUploadsInFlightRef.current.has(routeThreadKey) ||
+      scratchDraftEnvironment.requestRef.current !== null
     ) {
       notifyDirectAnnotationAttached();
       return;
@@ -10017,15 +10067,17 @@ export default function ChatView(props: ChatViewProps) {
                             isSendBusy={isSendBusy}
                             isRevertingCheckpoint={isRevertingCheckpoint}
                             sendDisabledReason={
-                              isRevertingCheckpoint
-                                ? "Rewinding conversation"
-                                : feedbackUploading
-                                  ? "Sending feedback"
-                                  : threadDetailLoading
-                                    ? "Messages loading"
-                                    : worktreeSetupBlocksSend
-                                      ? "Preparing worktree"
-                                      : projectCloneSendBlockReason
+                              scratchDraftEnvironment.pending
+                                ? "Preparing machine"
+                                : isRevertingCheckpoint
+                                  ? "Rewinding conversation"
+                                  : feedbackUploading
+                                    ? "Sending feedback"
+                                    : threadDetailLoading
+                                      ? "Messages loading"
+                                      : worktreeSetupBlocksSend
+                                        ? "Preparing worktree"
+                                        : projectCloneSendBlockReason
                             }
                             isPreparingWorktree={isPreparingWorktree}
                             bannerItems={composerBannerItems}
@@ -10158,11 +10210,12 @@ export default function ChatView(props: ChatViewProps) {
                                   draftId &&
                                   !envLocked &&
                                   hasMultipleEnvironments &&
-                                  loadBalancingSettings.loadBalancingEnabled
+                                  loadBalancingSettings.loadBalancingEnabled &&
+                                  !scratchDraftEnvironment.isScratchDraft
                                     ? onAutoEnvironment
                                     : undefined
                                 }
-                                availableEnvironments={logicalProjectEnvironments}
+                                availableEnvironments={composerEnvironments}
                                 composerControlsHostRef={setRestingComposerControlsHost}
                                 contextStripVisible={showComposerContextStrip}
                               />

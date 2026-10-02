@@ -21,6 +21,7 @@ describe("KeybindingsSettings.logic", () => {
     const rows = buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS, "");
     for (const command of [
       "composer.host",
+      "composer.cycleHost",
       "composer.effort",
       "composer.mode",
       "composer.workspace",

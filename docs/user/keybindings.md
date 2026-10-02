@@ -15,6 +15,7 @@ use `mod+Shift+Enter` for the opposite action. In a new thread, `mod+Enter` keep
 starting the thread in the background.
 
 Use `mod+shift+m` to choose a model and `mod+shift+h` to choose a host.
+In a new thread, `mod+alt+h` cycles through available machines.
 Use `mod+shift+e` for effort, `mod+shift+a` for access mode, `mod+shift+x` for the
 workspace, and `mod+shift+g` for the Git branch. The workspace menu includes the
 current checkout, a new worktree, and the previous worktree when available.

@@ -21,7 +21,7 @@ interface BranchToolbarEnvironmentSelectorProps {
   onAutoEnvironment?: (() => void) | undefined;
   envLocked: boolean;
   environmentId: EnvironmentId;
-  availableEnvironments: readonly EnvironmentOption[];
+  availableEnvironments: readonly Omit<EnvironmentOption, "projectId">[];
   // Absent when there is only one environment to show: the indicator still
   // renders (as a static label) so remote projects are always identifiable.
   onEnvironmentChange?: (environmentId: EnvironmentId) => void;
