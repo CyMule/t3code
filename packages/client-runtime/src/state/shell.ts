@@ -219,7 +219,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
   const foregroundResubscriptions = Option.match(wakeups, {
     onNone: () => Stream.never,
     onSome: (service) =>
-      service.changes.pipe(Stream.filter(ConnectionWakeups.shouldResubscribeAfterWakeup)),
+      service.changes.pipe(Stream.filter(ConnectionWakeups.isApplicationActiveWakeup)),
   });
 
   yield* setSynchronizing;
