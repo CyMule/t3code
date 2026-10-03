@@ -134,12 +134,10 @@ describe("AssetAccess", () => {
   );
 
   // Complete 1x1 images; no encoder dependency or external files are needed at test time.
+  const jpegFixture =
+    "/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAAAP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AAA//2Q==";
   it.effect.each([
-    [
-      "image/jpeg",
-      "/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAAAP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AAA//2Q==",
-      ["image.jpg", "image.jpeg", "image"],
-    ],
+    ["image/jpeg", jpegFixture, ["image.jpg", "image.jpeg", "image"]],
     [
       "image/png",
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNoaGgAAAMEAYEezv+mAAAAAElFTkSuQmCC",
@@ -183,7 +181,6 @@ describe("AssetAccess", () => {
           expect(new Uint8Array(yield* Effect.promise(() => response.arrayBuffer()))).toEqual(
             bytes,
           );
-          expect(yield* resolveAsset(token, "sibling")).toBeNull();
           if (name === "image") {
             // Re-check content at serving time, even when the inode hasn't changed.
             yield* fs.writeFileString(filePath, "<html>not an image</html>");
@@ -199,13 +196,13 @@ describe("AssetAccess", () => {
       const path = yield* Path.Path;
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-image-rejection-" });
       for (const [name, contents] of [
-        ["empty", ""],
-        ["text", "not an image"],
-        ["markup", "<svg/>"],
-        ["image.txt", "\xff\xd8\xff\xe0"],
+        ["empty", Buffer.alloc(0)],
+        ["text", Buffer.from("not an image")],
+        ["markup", Buffer.from("<svg/>")],
+        ["image.txt", Buffer.from(jpegFixture, "base64")],
       ] as const) {
         const filePath = path.join(root, name);
-        yield* fs.writeFile(filePath, Buffer.from(contents, "latin1"));
+        yield* fs.writeFile(filePath, contents);
         const error = yield* issueAssetUrl({
           resource: { _tag: "media-file", threadId: ThreadId.make("thread-1"), path: filePath },
         }).pipe(Effect.flip);

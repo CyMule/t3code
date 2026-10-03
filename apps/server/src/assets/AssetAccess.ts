@@ -253,12 +253,7 @@ const resolveCanonicalWorkspaceFileForRequest = (input: {
     Effect.orElseSucceed(() => null),
   );
 
-/**
- * Reads pixel dimensions from an image's header so clients can reserve the
- * exact box before the bytes arrive. Best effort: an unreadable or unsupported
- * file just leaves the field out, and the client measures after decode. Only
- * formats the parser understands are opened; SVG and the rest are skipped.
- */
+/** Only formats the header parser understands are measured; SVG and the rest are skipped. */
 const hasHeaderDimensions = (mimeType: string | null) =>
   mimeType !== null && HEADER_IMAGE_MIME_TYPES.has(mimeType);
 
@@ -268,7 +263,12 @@ const sniffImageMimeType = (filePath: string, file: OpenMediaFile) =>
     Effect.map(imageMimeTypeFromHeader),
   );
 
-/** From the identity-checked, non-blocking handle the caller already holds. */
+/**
+ * Reads pixel dimensions from an image's header so clients can reserve the
+ * exact box before the bytes arrive. Best effort: an unreadable or unsupported
+ * file just leaves the field out, and the client measures after decode. Reads
+ * from the identity-checked, non-blocking handle the caller already holds.
+ */
 const readImageDimensionsFromOpenFile = (filePath: string, file: OpenMediaFile) =>
   readMediaFileHeader(filePath, file, IMAGE_DIMENSIONS_HEADER_BYTES).pipe(
     Effect.map(readImageDimensions),
