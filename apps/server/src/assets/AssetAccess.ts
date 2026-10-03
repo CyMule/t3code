@@ -49,6 +49,7 @@ import {
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { parseAttachmentFileExtension, resolveAttachmentPathById } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
+import { IMAGE_SIGNATURE_BYTES, imageMimeTypeFromHeader } from "../imageMime.ts";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
@@ -293,43 +294,45 @@ const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMe
     if (!canonicalFile) {
       return yield* new AssetWorkspaceAssetNotFoundError({ resource: input.resource });
     }
-    if (hostPreviewMimeTypeFromExtension(path.extname(canonicalFile)) === null) {
+    const extension = path.extname(canonicalFile);
+    if (extension !== "" && hostPreviewMimeTypeFromExtension(extension) === null) {
       return yield* new AssetPreviewTypeValidationError({ resource: input.resource });
     }
-    const wantsDimensions = HEADER_IMAGE_EXTENSIONS.has(path.extname(canonicalFile).toLowerCase());
-    const opened = yield* openMediaFile(canonicalFile).pipe(
-      Effect.flatMap((file) =>
-        file === null
-          ? Effect.succeed(null)
-          : Effect.map(
-              wantsDimensions
-                ? readImageDimensionsFromOpenFile(canonicalFile, file)
-                : Effect.succeed(null),
-              (dimensions) => ({
-                identity: { device: file.info.dev.toString(), inode: file.info.ino.toString() },
-                dimensions,
-              }),
-            ),
-      ),
-      Effect.scoped,
-      Effect.mapError(
-        (cause) => new AssetWorkspaceAssetInspectionError({ resource: input.resource, cause }),
-      ),
-    );
-    if (!opened) {
-      return yield* new AssetWorkspaceAssetNotFoundError({ resource: input.resource });
-    }
-    return {
-      claims: {
-        version: 1 as const,
-        kind: "media-file-exact" as const,
-        filePath: canonicalFile,
-        ...opened.identity,
-        expiresAt: input.expiresAt,
-      },
-      fileName: path.basename(canonicalFile),
-      imageDimensions: opened.dimensions,
-    };
+    const inspectionError = (cause: unknown) =>
+      new AssetWorkspaceAssetInspectionError({ resource: input.resource, cause });
+    return yield* Effect.gen(function* () {
+      const file = yield* openMediaFile(canonicalFile).pipe(Effect.mapError(inspectionError));
+      if (!file) {
+        return yield* new AssetWorkspaceAssetNotFoundError({ resource: input.resource });
+      }
+      let imageDimensions: ImageDimensions | null = null;
+      if (extension === "") {
+        // Extensionless files preview only as binary images; resolveAsset re-checks when serving.
+        const header = yield* readMediaFileHeader(
+          canonicalFile,
+          file,
+          IMAGE_DIMENSIONS_HEADER_BYTES,
+        ).pipe(Effect.mapError(inspectionError));
+        if (imageMimeTypeFromHeader(header) === null) {
+          return yield* new AssetPreviewTypeValidationError({ resource: input.resource });
+        }
+        imageDimensions = readImageDimensions(header);
+      } else if (HEADER_IMAGE_EXTENSIONS.has(extension.toLowerCase())) {
+        imageDimensions = yield* readImageDimensionsFromOpenFile(canonicalFile, file);
+      }
+      return {
+        claims: {
+          version: 1 as const,
+          kind: "media-file-exact" as const,
+          filePath: canonicalFile,
+          device: file.info.dev.toString(),
+          inode: file.info.ino.toString(),
+          expiresAt: input.expiresAt,
+        },
+        fileName: path.basename(canonicalFile),
+        imageDimensions,
+      };
+    }).pipe(Effect.scoped);
   },
 );
 
@@ -826,15 +829,23 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
       Effect.orElseSucceed(() => null),
     );
     if (canonicalFile !== claims.filePath) return null;
-    const mimeType = hostPreviewMimeTypeFromExtension(path.extname(canonicalFile));
-    if (!mimeType) return null;
+    const extension = path.extname(canonicalFile);
+    const extensionMimeType = hostPreviewMimeTypeFromExtension(extension);
+    if (extension !== "" && !extensionMimeType) return null;
     const file = yield* openMediaFile(canonicalFile, claims).pipe(
       Effect.tapError((cause) =>
         Effect.logError("Failed to open canonical media file.", { filePath: canonicalFile, cause }),
       ),
       Effect.orElseSucceed(() => null),
     );
-    return file
+    if (!file) return null;
+    const mimeType =
+      extensionMimeType ??
+      (yield* readMediaFileHeader(canonicalFile, file, IMAGE_SIGNATURE_BYTES).pipe(
+        Effect.map(imageMimeTypeFromHeader),
+        Effect.orElseSucceed(() => null),
+      ));
+    return mimeType
       ? ({ kind: "file", path: canonicalFile, mimeType, file } satisfies ResolvedAsset)
       : null;
   }

@@ -133,6 +133,87 @@ describe("AssetAccess", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
+  // Complete 1x1 images; no encoder dependency or external files are needed at test time.
+  for (const [mimeType, base64, names] of [
+    [
+      "image/jpeg",
+      "/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAAAP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AAA//2Q==",
+      ["image.jpg", "image.jpeg", "image"],
+    ],
+    [
+      "image/png",
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNoaGgAAAMEAYEezv+mAAAAAElFTkSuQmCC",
+      ["image.png", "image"],
+    ],
+    [
+      "image/gif",
+      "R0lGODlhAQABAIAAAExpcYCAgCH5BAUAAAAALAAAAAABAAEAAAICTAEAOw==",
+      ["image.gif", "image"],
+    ],
+    [
+      "image/webp",
+      "UklGRiQAAABXRUJQVlA4IBgAAABQAQCdASoBAAEAAUAmJaQABHQAAORAAAA=",
+      ["image.webp", "image"],
+    ],
+  ] as const) {
+    it.effect(`serves ${mimeType} with and without extensions outside the workspace`, () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-jpeg-workspace-" });
+        const outside = yield* fs.makeTempDirectoryScoped({ prefix: "t3-jpeg-outside-" });
+        const bytes = Uint8Array.from(Buffer.from(base64, "base64"));
+        for (const name of names) {
+          const filePath = path.join(outside, name);
+          yield* fs.writeFile(filePath, bytes);
+          const result = yield* issueAssetUrl({
+            resource: { _tag: "media-file", threadId: ThreadId.make("thread-1"), path: filePath },
+            workspaceRoot: root,
+          });
+          expect(result.imageDimensions).toEqual({ width: 1, height: 1 });
+          const suffix = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+          const separator = suffix.indexOf("/");
+          const token = suffix.slice(0, separator);
+          const fileName = suffix.slice(separator + 1);
+          const asset = yield* resolveAsset(token, fileName);
+          if (asset?.kind !== "file") throw new Error("Expected image asset");
+          const response = HttpServerResponse.toWeb(yield* assetFileResponse(asset));
+          expect(response.headers.get("content-type")).toBe(mimeType);
+          expect(new Uint8Array(yield* Effect.promise(() => response.arrayBuffer()))).toEqual(
+            bytes,
+          );
+          expect(yield* resolveAsset(token, "sibling")).toBeNull();
+          if (name === "image") {
+            // Re-check content at serving time, even when the inode hasn't changed.
+            yield* fs.writeFileString(filePath, "<html>not an image</html>");
+            expect(yield* resolveAsset(token, fileName)).toBeNull();
+          }
+        }
+      }).pipe(Effect.provide(testLayer)),
+    );
+  }
+
+  it.effect("rejects extensionless text, empty files, and images with unsupported extensions", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-image-rejection-" });
+      for (const [name, contents] of [
+        ["empty", ""],
+        ["text", "not an image"],
+        ["markup", "<svg/>"],
+        ["image.txt", "\xff\xd8\xff\xe0"],
+      ] as const) {
+        const filePath = path.join(root, name);
+        yield* fs.writeFile(filePath, Buffer.from(contents, "latin1"));
+        const error = yield* issueAssetUrl({
+          resource: { _tag: "media-file", threadId: ThreadId.make("thread-1"), path: filePath },
+        }).pipe(Effect.flip);
+        expect(error).toBeInstanceOf(AssetPreviewTypeValidationError);
+      }
+    }).pipe(Effect.provide(testLayer)),
+  );
+
   it.effect("reports pixel dimensions from an image header and nothing for other files", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

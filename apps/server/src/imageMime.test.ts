@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { inferImageExtension, parseBase64DataUrl } from "./imageMime.ts";
+import { imageMimeTypeFromHeader, inferImageExtension, parseBase64DataUrl } from "./imageMime.ts";
 
 describe("imageMime", () => {
   it("parses base64 data URL with mime type", () => {
@@ -92,4 +92,23 @@ describe("imageMime", () => {
   it("does not read inherited keys from mime extension map", () => {
     expect(inferImageExtension({ mimeType: "constructor" })).toBe(".bin");
   });
+});
+
+describe("imageMimeTypeFromHeader", () => {
+  it.each([
+    [[0xff, 0xd8, 0xff, 0xe0], "image/jpeg"],
+    [[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], "image/png"],
+    [[...Buffer.from("GIF87a")], "image/gif"],
+    [[...Buffer.from("GIF89a")], "image/gif"],
+    [[...Buffer.from("RIFF"), 12, 0, 0, 0, ...Buffer.from("WEBP")], "image/webp"],
+  ] as const)("recognizes image header %j", (header, mimeType) => {
+    expect(imageMimeTypeFromHeader(Uint8Array.from(header))).toBe(mimeType);
+    expect(imageMimeTypeFromHeader(Uint8Array.from(header.slice(0, 2)))).toBeNull();
+  });
+  it.each(["", "plain text", "<svg/>", "<html/>", "RIFF1234WAVE", "GIF80a"])(
+    "rejects non-image content %j",
+    (contents) => {
+      expect(imageMimeTypeFromHeader(Buffer.from(contents))).toBeNull();
+    },
+  );
 });

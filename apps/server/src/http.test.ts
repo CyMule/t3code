@@ -617,6 +617,22 @@ describe("assetResponseHeaders", () => {
     });
   });
 
+  it.each(["image/jpeg", "image/png", "image/gif", "image/webp"])(
+    "serves extensionless raster images as %s",
+    (mimeType) => {
+      expect(assetResponseHeaders("/tmp/image", { mimeType })).toMatchObject({
+        "Content-Type": mimeType,
+        "X-Content-Type-Options": "nosniff",
+      });
+    },
+  );
+
+  it("does not treat declared SVG content as an extensionless raster image", () => {
+    expect(assetResponseHeaders("/tmp/image", { mimeType: "image/svg+xml" })).not.toHaveProperty(
+      "Content-Type",
+    );
+  });
+
   it("serves inline videos with their declared mime type", () => {
     expect(
       assetResponseHeaders("/attachments/demo.bin", {

@@ -64,7 +64,8 @@ const isSafeDownloadMimeType = (mimeType: string): boolean =>
   DOWNLOAD_MIME_TYPE_PATTERN.test(mimeType) &&
   !/(?:^text\/html$|\/xml(?:$|-)|\+xml$)/i.test(mimeType.trim().toLowerCase());
 const isSafeInlineMediaMimeType = (mimeType: string): boolean =>
-  DOWNLOAD_MIME_TYPE_PATTERN.test(mimeType) && /^(?:audio|video)\//i.test(mimeType);
+  DOWNLOAD_MIME_TYPE_PATTERN.test(mimeType) &&
+  (/^(?:audio|video)\//i.test(mimeType) || /^image\/(?:jpeg|png|gif|webp)$/i.test(mimeType));
 const isSafeInlineDocumentMimeType = (mimeType: string): boolean =>
   mimeType.toLowerCase() === "application/pdf" || mimeType.toLowerCase() === "text/html";
 
