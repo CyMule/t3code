@@ -618,7 +618,7 @@ describe("assetResponseHeaders", () => {
   });
 
   it.each(["image/jpeg", "image/png", "image/gif", "image/webp"])(
-    "serves extensionless raster images as %s",
+    "serves declared raster image types inline as %s",
     (mimeType) => {
       expect(assetResponseHeaders("/tmp/image", { mimeType })).toMatchObject({
         "Content-Type": mimeType,

@@ -295,11 +295,7 @@ const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMe
     readonly expiresAt: number;
   }) {
     const path = yield* Path.Path;
-    const canonicalFile = yield* resolveCanonicalFile(input.requestedPath).pipe(
-      Effect.mapError(
-        (cause) => new AssetWorkspaceAssetInspectionError({ resource: input.resource, cause }),
-      ),
-    );
+    const canonicalFile = yield* resolveCanonicalFile(input.requestedPath);
     if (!canonicalFile) {
       return yield* new AssetWorkspaceAssetNotFoundError({ resource: input.resource });
     }
@@ -308,36 +304,40 @@ const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMe
     if (extension !== "" && extensionMimeType === null) {
       return yield* new AssetPreviewTypeValidationError({ resource: input.resource });
     }
-    const inspectionError = (cause: unknown) =>
-      new AssetWorkspaceAssetInspectionError({ resource: input.resource, cause });
-    return yield* Effect.gen(function* () {
-      const file = yield* openMediaFile(canonicalFile).pipe(Effect.mapError(inspectionError));
-      if (!file) {
-        return yield* new AssetWorkspaceAssetNotFoundError({ resource: input.resource });
-      }
-      const mimeType =
-        extensionMimeType ??
-        (yield* sniffImageMimeType(canonicalFile, file).pipe(Effect.mapError(inspectionError)));
-      if (mimeType === null) {
-        return yield* new AssetPreviewTypeValidationError({ resource: input.resource });
-      }
-      const imageDimensions = hasHeaderDimensions(mimeType)
-        ? yield* readImageDimensionsFromOpenFile(canonicalFile, file)
-        : null;
-      return {
-        claims: {
-          version: 1 as const,
-          kind: "media-file-exact" as const,
-          filePath: canonicalFile,
-          device: file.info.dev.toString(),
-          inode: file.info.ino.toString(),
-          expiresAt: input.expiresAt,
-        },
-        fileName: path.basename(canonicalFile),
-        imageDimensions,
-      };
-    }).pipe(Effect.scoped);
+    const file = yield* openMediaFile(canonicalFile);
+    if (!file) {
+      return yield* new AssetWorkspaceAssetNotFoundError({ resource: input.resource });
+    }
+    const mimeType = extensionMimeType ?? (yield* sniffImageMimeType(canonicalFile, file));
+    if (mimeType === null) {
+      return yield* new AssetPreviewTypeValidationError({ resource: input.resource });
+    }
+    const imageDimensions = hasHeaderDimensions(mimeType)
+      ? yield* readImageDimensionsFromOpenFile(canonicalFile, file)
+      : null;
+    return {
+      claims: {
+        version: 1 as const,
+        kind: "media-file-exact" as const,
+        filePath: canonicalFile,
+        device: file.info.dev.toString(),
+        inode: file.info.ino.toString(),
+        expiresAt: input.expiresAt,
+      },
+      fileName: path.basename(canonicalFile),
+      imageDimensions,
+    };
   },
+  Effect.scoped,
+  (effect, input) =>
+    Effect.catchTags(effect, {
+      PlatformError: (cause) =>
+        new AssetWorkspaceAssetInspectionError({ resource: input.resource, cause }),
+      MediaFileOpenError: (cause) =>
+        new AssetWorkspaceAssetInspectionError({ resource: input.resource, cause }),
+      MediaFileReadError: (cause) =>
+        new AssetWorkspaceAssetInspectionError({ resource: input.resource, cause }),
+    }),
 );
 
 const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileAsset")(
@@ -845,7 +845,12 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
     if (!file) return null;
     const mimeType =
       extensionMimeType ??
-      (yield* sniffImageMimeType(canonicalFile, file).pipe(Effect.orElseSucceed(() => null)));
+      (yield* sniffImageMimeType(canonicalFile, file).pipe(
+        Effect.tapError((cause) =>
+          Effect.logError("Failed to read media file header.", { filePath: canonicalFile, cause }),
+        ),
+        Effect.orElseSucceed(() => null),
+      ));
     return mimeType
       ? ({ kind: "file", path: canonicalFile, mimeType, file } satisfies ResolvedAsset)
       : null;

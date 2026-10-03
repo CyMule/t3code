@@ -21,7 +21,11 @@ export function readImageDimensions(bytes: Uint8Array): ImageDimensions | null {
   return dimensions && dimensions.width > 0 && dimensions.height > 0 ? dimensions : null;
 }
 
-/** Raster formats `imageMimeTypeFromHeader` recognizes and `readImageDimensions` can measure. */
+/**
+ * Raster formats `imageMimeTypeFromHeader` recognizes and `readImageDimensions`
+ * can measure. The HTTP layer also trusts these as inline response types, so
+ * adding a format here widens what is served inline.
+ */
 export const HEADER_IMAGE_MIME_TYPES: ReadonlySet<string> = new Set([
   "image/jpeg",
   "image/png",
