@@ -134,7 +134,7 @@ describe("AssetAccess", () => {
   );
 
   // Complete 1x1 images; no encoder dependency or external files are needed at test time.
-  for (const [mimeType, base64, names] of [
+  it.effect.each([
     [
       "image/jpeg",
       "/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAAAP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AAA//2Q==",
@@ -155,13 +155,14 @@ describe("AssetAccess", () => {
       "UklGRiQAAABXRUJQVlA4IBgAAABQAQCdASoBAAEAAUAmJaQABHQAAORAAAA=",
       ["image.webp", "image"],
     ],
-  ] as const) {
-    it.effect(`serves ${mimeType} with and without extensions outside the workspace`, () =>
+  ] as const)(
+    "serves %s with and without extensions outside the workspace",
+    ([mimeType, base64, names]) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-jpeg-workspace-" });
-        const outside = yield* fs.makeTempDirectoryScoped({ prefix: "t3-jpeg-outside-" });
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-image-workspace-" });
+        const outside = yield* fs.makeTempDirectoryScoped({ prefix: "t3-image-outside-" });
         const bytes = Uint8Array.from(Buffer.from(base64, "base64"));
         for (const name of names) {
           const filePath = path.join(outside, name);
@@ -190,8 +191,7 @@ describe("AssetAccess", () => {
           }
         }
       }).pipe(Effect.provide(testLayer)),
-    );
-  }
+  );
 
   it.effect("rejects extensionless text, empty files, and images with unsupported extensions", () =>
     Effect.gen(function* () {

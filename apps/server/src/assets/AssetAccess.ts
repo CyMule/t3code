@@ -24,7 +24,10 @@ import {
   WORKSPACE_IMAGE_PREVIEW_EXTENSIONS,
 } from "@t3tools/shared/filePreview";
 import {
+  HEADER_IMAGE_MIME_TYPES,
   IMAGE_DIMENSIONS_HEADER_BYTES,
+  IMAGE_SIGNATURE_BYTES,
+  imageMimeTypeFromHeader,
   readImageDimensions,
   type ImageDimensions,
 } from "@t3tools/shared/imageDimensions";
@@ -49,7 +52,6 @@ import {
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { parseAttachmentFileExtension, resolveAttachmentPathById } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
-import { IMAGE_SIGNATURE_BYTES, imageMimeTypeFromHeader } from "../imageMime.ts";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
@@ -257,7 +259,14 @@ const resolveCanonicalWorkspaceFileForRequest = (input: {
  * file just leaves the field out, and the client measures after decode. Only
  * formats the parser understands are opened; SVG and the rest are skipped.
  */
-const HEADER_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
+const hasHeaderDimensions = (mimeType: string | null) =>
+  mimeType !== null && HEADER_IMAGE_MIME_TYPES.has(mimeType);
+
+/** Extensionless files preview only as binary images, so their type comes from the bytes. */
+const sniffImageMimeType = (filePath: string, file: OpenMediaFile) =>
+  readMediaFileHeader(filePath, file, IMAGE_SIGNATURE_BYTES).pipe(
+    Effect.map(imageMimeTypeFromHeader),
+  );
 
 /** From the identity-checked, non-blocking handle the caller already holds. */
 const readImageDimensionsFromOpenFile = (filePath: string, file: OpenMediaFile) =>
@@ -295,7 +304,8 @@ const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMe
       return yield* new AssetWorkspaceAssetNotFoundError({ resource: input.resource });
     }
     const extension = path.extname(canonicalFile);
-    if (extension !== "" && hostPreviewMimeTypeFromExtension(extension) === null) {
+    const extensionMimeType = hostPreviewMimeTypeFromExtension(extension);
+    if (extension !== "" && extensionMimeType === null) {
       return yield* new AssetPreviewTypeValidationError({ resource: input.resource });
     }
     const inspectionError = (cause: unknown) =>
@@ -305,21 +315,15 @@ const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMe
       if (!file) {
         return yield* new AssetWorkspaceAssetNotFoundError({ resource: input.resource });
       }
-      let imageDimensions: ImageDimensions | null = null;
-      if (extension === "") {
-        // Extensionless files preview only as binary images; resolveAsset re-checks when serving.
-        const header = yield* readMediaFileHeader(
-          canonicalFile,
-          file,
-          IMAGE_DIMENSIONS_HEADER_BYTES,
-        ).pipe(Effect.mapError(inspectionError));
-        if (imageMimeTypeFromHeader(header) === null) {
-          return yield* new AssetPreviewTypeValidationError({ resource: input.resource });
-        }
-        imageDimensions = readImageDimensions(header);
-      } else if (HEADER_IMAGE_EXTENSIONS.has(extension.toLowerCase())) {
-        imageDimensions = yield* readImageDimensionsFromOpenFile(canonicalFile, file);
+      const mimeType =
+        extensionMimeType ??
+        (yield* sniffImageMimeType(canonicalFile, file).pipe(Effect.mapError(inspectionError)));
+      if (mimeType === null) {
+        return yield* new AssetPreviewTypeValidationError({ resource: input.resource });
       }
+      const imageDimensions = hasHeaderDimensions(mimeType)
+        ? yield* readImageDimensionsFromOpenFile(canonicalFile, file)
+        : null;
       return {
         claims: {
           version: 1 as const,
@@ -391,8 +395,8 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
           }),
       ),
     );
-    const imageDimensions = HEADER_IMAGE_EXTENSIONS.has(
-      path.extname(resolved.relativePath).toLowerCase(),
+    const imageDimensions = hasHeaderDimensions(
+      hostPreviewMimeTypeFromExtension(path.extname(resolved.relativePath)),
     )
       ? yield* readImageDimensionsFromHeader(canonicalFile)
       : null;
@@ -841,10 +845,7 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
     if (!file) return null;
     const mimeType =
       extensionMimeType ??
-      (yield* readMediaFileHeader(canonicalFile, file, IMAGE_SIGNATURE_BYTES).pipe(
-        Effect.map(imageMimeTypeFromHeader),
-        Effect.orElseSucceed(() => null),
-      ));
+      (yield* sniffImageMimeType(canonicalFile, file).pipe(Effect.orElseSucceed(() => null)));
     return mimeType
       ? ({ kind: "file", path: canonicalFile, mimeType, file } satisfies ResolvedAsset)
       : null;

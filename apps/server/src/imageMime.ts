@@ -1,21 +1,6 @@
 import * as Option from "effect/Option";
 import * as Mime from "effect/unstable/http/Mime";
 
-/** Bytes `imageMimeTypeFromHeader` needs to recognize every supported signature. */
-export const IMAGE_SIGNATURE_BYTES = 12;
-
-/** Recognizes binary image signatures only; never interprets text as SVG or HTML. */
-export function imageMimeTypeFromHeader(bytes: Uint8Array): string | null {
-  const matches = (offset: number, signature: string) =>
-    bytes.length >= offset + signature.length &&
-    [...signature].every((char, index) => bytes[offset + index] === char.charCodeAt(0));
-  if (matches(0, "\xff\xd8\xff")) return "image/jpeg";
-  if (matches(0, "\x89PNG\r\n\x1a\n")) return "image/png";
-  if (matches(0, "GIF87a") || matches(0, "GIF89a")) return "image/gif";
-  if (matches(0, "RIFF") && matches(8, "WEBP")) return "image/webp";
-  return null;
-}
-
 const IMAGE_EXTENSION_BY_MIME_TYPE: Record<string, string> = {
   "image/avif": ".avif",
   "image/bmp": ".bmp",

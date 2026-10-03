@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { readImageDimensions } from "./imageDimensions.ts";
+import { imageMimeTypeFromHeader, readImageDimensions } from "./imageDimensions.ts";
 
 function bytes(...parts: ReadonlyArray<number | string | ReadonlyArray<number>>): Uint8Array {
   const out: number[] = [];
@@ -137,4 +137,24 @@ describe("readImageDimensions", () => {
     expect(readImageDimensions(bytes([0xff, 0xd8], [0xff, 0xd9]))).toBeNull();
     expect(readImageDimensions(new Uint8Array())).toBeNull();
   });
+});
+
+describe("imageMimeTypeFromHeader", () => {
+  it.each([
+    [bytes([0xff, 0xd8, 0xff, 0xe0]), "image/jpeg"],
+    [bytes([0x89], "PNG\r\n", [0x1a], "\n"), "image/png"],
+    [bytes("GIF87a"), "image/gif"],
+    [bytes("GIF89a"), "image/gif"],
+    [bytes("RIFF", [12, 0, 0, 0], "WEBP"), "image/webp"],
+  ])("recognizes image header %j", (header, mimeType) => {
+    expect(imageMimeTypeFromHeader(header)).toBe(mimeType);
+    expect(imageMimeTypeFromHeader(header.subarray(0, 2))).toBeNull();
+  });
+
+  it.each(["", "plain text", "<svg/>", "<html/>", "RIFF1234WAVE", "GIF80a"])(
+    "rejects non-image content %j",
+    (contents) => {
+      expect(imageMimeTypeFromHeader(bytes(contents))).toBeNull();
+    },
+  );
 });
